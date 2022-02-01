@@ -222,7 +222,9 @@ class GedMerger
                 } elseif ($timeSpan < 3500000000) {
                     $birthDate = floor(date('Y', $avgTimestamp) / 100) . 'xx-xx-xx';
                 }
-                if ($birthDate !== 'xxxx-xx-xx') yield 'OK: ' . $birthDate . ' ' . $name . ' (' . $timeSpan . ')';
+                if ($birthDate !== 'xxxx-xx-xx') {
+                    yield 'OK: ' . $birthDate . ' ' . $name;
+                }
             } else {
                 yield 'No birthdate for ' . $name;
             }
