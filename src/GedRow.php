@@ -51,7 +51,7 @@ class GedRow
         }
     }
 
-    private function line(): string
+    public function line(): string
     {
         return $this->level . ($this->label ? ' @' . $this->label . '@' : '') . ' ' . $this->type . ($this->value ? ' ' . $this->value : '');
     }

@@ -119,7 +119,7 @@ class FileSessions
             $seekFrom = $position;
         }
         /** @var int $lineFrom null is taken care of above */
-        $line = $lineFrom;
+        $line = $lineFrom - 1;
         $lastPosition = $seekFrom;
         while (!feof($this->file)) {
             if ($lineTo && $line >= $lineTo) {
@@ -133,6 +133,7 @@ class FileSessions
             $position = $this->fileSessionSave();
             yield new FileRow($content, $lastPosition, $position, $line);
             $this->fileSessionSwitch($sessionId);
+            $lastPosition = $position;
         }
 
         $this->fileSessionClose($sessionId);
