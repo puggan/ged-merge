@@ -125,7 +125,7 @@ class GedMerger
             $lastLeft = end($stack);
             if ($lastLeft) {
                 $addContent = $wanted($lastPopped->level, $lastPopped->type, $debug);
-                $lastLeft->addChild($lastPopped, $addContent);
+                $lastLeft->addOwnChild($lastPopped, $addContent);
                 //echo json_encode([$addContent, $lastPopped->type, $lastLeft->type, $lastPopped, $lastLeft], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), PHP_EOL;
                 if ($children && $addContent) {
                     return $lastPopped;
@@ -178,7 +178,7 @@ class GedMerger
                 $root->children['@'][$child->label] = $child;
             }
             if ($child->level === 0) {
-                $root->addChild($child, true);
+                $root->addOwnChild($child, true);
             }
         }
         return $root;

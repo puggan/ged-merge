@@ -28,7 +28,7 @@ class GedRow
         $this->displayName = trim($this->type . ' ' . ($this->label ?: $this->value));
     }
 
-    public function addChild(GedRow $child, bool $addContent)
+    public function addOwnChild(GedRow $child, bool $addContent)
     {
         if ($addContent) {
             $this->children += [$child->type => []];
@@ -36,6 +36,34 @@ class GedRow
         }
         $this->seekSectionEnd = max($this->seekSectionEnd, $child->seekSectionEnd);
         $this->lineSectionEnd = max($this->lineSectionEnd, $child->lineSectionEnd);
+    }
+
+    public function makeChild(string $type, string $label, string $value)
+    {
+        $fakeRow = new FileRow('', 0, 0, 0, -1);
+        return new self($fakeRow, $this->level + 1, $type, $label, $value);
+    }
+
+    public function appendChild(GedRow $child)
+    {
+        if ($child->level !== $this->level + 1) {
+            throw new \RuntimeException(
+                'Wrong level on child, expected: ' . ($this->level + 1) . ' got: ' . $child->level
+            );
+        }
+        $this->children += [$child->type => []];
+        $this->children[$child->type][] = $child;
+    }
+
+    public function replaceChild(GedRow $child)
+    {
+        if ($child->level !== $this->level + 1) {
+            throw new \RuntimeException(
+                'Wrong level on child, expected: ' . ($this->level + 1) . ' got: ' . $child->level
+            );
+        }
+        $this->children[$child->type] = [];
+        return $this->appendChild($child);
     }
 
     /**
