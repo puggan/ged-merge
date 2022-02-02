@@ -12,9 +12,9 @@ class GedMerger
     const REGEXP_DATE_DMY = '#^(?:(?<c>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d>\d+) (?<m>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) (?<y>\d+)(?: (?<e>.*))?$#';
     const REGEXP_DATE_DMY_INVALID = '#^(?:(?<c>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d>\d+) (?<month>[A-Za-z]+) (?<y>\d+)(?: (?<e>.*))?$#';
     const REGEXP_DATE_RANGE =
-        '#^((?<t1>BET) (?:(?:(?:(?<c1>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d1>\d+) )(?<m1>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) )(?<y1>\d+)(?: (?<e1>.*))? ' .
-        '(?<t2>AND) (?:(?:(?:(?<c2>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d2>\d+) )(?<m2>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) )(?<y2>\d+)(?: (?<e2>.*))?|' .
-        '(?:(?<t>BEF|AFT|ABT|CAL|EST) )?(?:(?:(?:(?<c>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d>\d+) )(?<m>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) )(?<y>\d+)(?: (?<e>.*))?)$#';
+        '#^((?<t1>BET) (?:(?:(?:(?<c1>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d1>\d+) )?(?<m1>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) )?(?<y1>\d+)(?: (?<e1>.*))? ' .
+        '(?<t2>AND) (?:(?:(?:(?<c2>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d2>\d+) )?(?<m2>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) )?(?<y2>\d+)(?: (?<e2>.*))?|' .
+        '(?:(?<t>BEF|AFT|ABT|CAL|EST) )?(?:(?:(?:(?<c>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d>\d+) )?(?<m>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) )?(?<y>\d+)(?: (?<e>.*))?)$#';
     const MONTH_NAMES = [1 => 'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
     const MONTH_LOOKUP = [
         'JAN' => 1,
@@ -87,7 +87,7 @@ class GedMerger
             }
 
             if (is_array($levelRules)) {
-                //echo $level, ' ', $type, in_array($type, $levelRules) ? '' : ' not', ' in ', json_encode($levelRules), PHP_EOL;
+                //echo $level, ' ', $type, in_array($type, $levelRules) ? '' : ' not', ' in ', json_encode($levelRules, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), PHP_EOL;
                 return in_array($type, $levelRules, true);
             }
             foreach (range($level, 0, -1) as $stackLevel) {
@@ -98,7 +98,7 @@ class GedMerger
 
                 if (is_array($levelRules)) {
                     $stackType = ($stack[$stackLevel] ?? null)?->type;
-                    //echo $stackLevel, ' ', $type, in_array($stackType, $levelRules) ? '' : ' not', ' in ', json_encode($levelRules), PHP_EOL;
+                    //echo $stackLevel, ' ', $type, in_array($stackType, $levelRules) ? '' : ' not', ' in ', json_encode($levelRules, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), PHP_EOL;
                     return $stackType && in_array($stackType, $levelRules, true);
                 }
             }
@@ -117,7 +117,7 @@ class GedMerger
             if ($lastLeft) {
                 $addContent = $wanted($lastPopped->level, $lastPopped->type);
                 $lastLeft->addChild($lastPopped, $addContent);
-                //echo json_encode([$addContent, $lastPopped->type, $lastLeft->type, $lastPopped, $lastLeft]), PHP_EOL;
+                //echo json_encode([$addContent, $lastPopped->type, $lastLeft->type, $lastPopped, $lastLeft], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), PHP_EOL;
                 if ($children && $addContent) {
                     return $lastPopped;
                 }
@@ -148,7 +148,7 @@ class GedMerger
                 //echo '+ ', ($stack ? implode('->', array_map( function(GedRow $r) {return $r->type;}, $stack)) . '->' : ''), $gedRow->type, PHP_EOL;
                 $stack[$gedRow->level] = $gedRow;
             } else {
-                error_log('Bad row: ' . json_encode($row, JSON_THROW_ON_ERROR));
+                error_log('Bad row: ' . json_encode($row, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
             }
         }
         while (!empty($stack)) {
@@ -194,7 +194,7 @@ class GedMerger
                 $names[] = $nameRow->value;
             }
             if (count($names) !== 1) {
-                yield 'Multiple names: ' . json_encode($names, JSON_UNESCAPED_UNICODE);
+                yield 'Multiple names: ' . json_encode($names, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
             }
             $name = $names[0] ?? '(unknown)';
             //</editor-fold>
@@ -218,17 +218,29 @@ class GedMerger
                 }
                 $timeSpan = $birthDateTo - $birthDateFrom;
                 if ($birthDateFrom === PHP_INT_MIN || $birthDateTo === PHP_INT_MAX || $timeSpan > 3000000000) {
-                    yield 'Invalid birthdate for ' . $name . ': ' . json_encode(array_keys($birthDates));
+                    yield 'Invalid birthdate for ' . $name . ': ' .
+                        json_encode(array_keys($birthDates), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+                    // Try to repair, to enable more tests
+                    $firstBirthDate = self::parseDateRange(
+                        $indi->children['BIRT'][0]->children['DATE'][0]->value ?? ''
+                    );
+                    $birthDateFrom = $firstBirthDate[0];
+                    $birthDateTo = $firstBirthDate[1];
+                }
+                if ($birthDateFrom === PHP_INT_MIN || $birthDateTo === PHP_INT_MAX || $timeSpan > 3000000000) {
+                    // same error again, skip
                 } elseif ($timeSpan < 0) {
-                    yield 'Invalid birthdate-ranfe for ' . $name . ': ' . json_encode(array_keys($birthDates));
+                    yield 'Invalid birthdate-range for ' . $name . ': ' .
+                        json_encode(array_keys($birthDates), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
                 } else {
                     $birthDate = $this->dateRangeShortText($birthDateFrom, $birthDateTo);
-                    yield 'OK: ' . $birthDate . ' ' . $name;
-                }
-                if ($indi->label) {
-                    $birthByLabel[$indi->label] = floor($birthDateTo / 2 + $birthDateFrom / 2);
+                    //yield 'OK: ' . $birthDate . ' ' . $name;
+                    if ($indi->label) {
+                        $birthByLabel[$indi->label] = floor($birthDateTo / 2 + $birthDateFrom / 2);
+                    }
                 }
             } else {
+                $birthDate = 'xxxx-xx-xx';
                 yield 'No birthdate for ' . $name;
             }
             //</editor-fold>
@@ -252,13 +264,16 @@ class GedMerger
                 }
                 $timeSpan = $deathDateTo - $deathDateFrom;
                 if ($deathDateFrom === PHP_INT_MIN || $deathDateTo === PHP_INT_MAX || $timeSpan > 3000000000) {
-                    yield 'Invalid deathdate for ' . $name . ': ' . json_encode(array_keys($deathDates));
+                    yield 'Invalid deathdate for ' . $name . ': ' .
+                        json_encode(array_keys($deathDates), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
                 } elseif ($timeSpan < 0) {
-                    yield 'Invalid deathdate-ranfe for ' . $name . ': ' . json_encode(array_keys($deathDates));
+                    yield 'Invalid deathdate-ranfe for ' . $name . ': ' .
+                        json_encode(array_keys($deathDates), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
                 } else {
                     $deathDate = $this->dateRangeShortText($deathDateFrom, $deathDateTo);
-                    yield 'OK: ' . $deathDate . ' ' . $name;
                 }
+            } else {
+                $deathDate = 'xxxx-xx-xx';
             }
             //</editor-fold>
 
@@ -270,11 +285,23 @@ class GedMerger
                     yield 'Extream age: ' . $years . ' for ' . $name;
                 }
             }
+
+            if (!$indi->label) {
+                yield 'INDI not labeld: ' . $name;
+            }
         }
 
+        $labelPairs = [];
+
+        //<editor-fold desc="Family">
         foreach ($root->children['FAM'] ?? [] as $fam) {
-            $husbandLabel = $fam->children['HUSB'][0]->value ?? '';
-            $wifeLabel = $fam->children['WIFE'][0]->value ?? '';
+            $husbandLabel = trim($fam->children['HUSB'][0]->value ?? '', '@');
+            $wifeLabel = trim($fam->children['WIFE'][0]->value ?? '', '@');
+
+            if ($husbandLabel && $wifeLabel) {
+                $labelPairs[$husbandLabel][$wifeLabel] = $fam->label;
+                $labelPairs[$wifeLabel][$husbandLabel] = $fam->label;
+            }
 
             $husbandBirth = $birthByLabel[$husbandLabel] ?? 0;
             $wifeBirth = $birthByLabel[$wifeLabel] ?? 0;
@@ -291,27 +318,77 @@ class GedMerger
                 }
             }
 
-            if ($parentBirth) {
-                foreach ($fam->children['CHIL'] as $child) {
-                    $childBirth = $birthByLabel[$child->label] ?? 0;
+            foreach ($fam->children['CHIL'] ?? [] as $child) {
+                if (!$child->value) {
+                    continue;
+                }
+                $childLabel = trim($child->value, '@');
+                if ($husbandLabel) {
+                    $labelPairs[$childLabel][$husbandLabel] = $fam->label;
+                    $labelPairs[$husbandLabel][$childLabel] = $fam->label;
+                }
+                if ($wifeLabel) {
+                    $labelPairs[$childLabel][$wifeLabel] = $fam->label;
+                    $labelPairs[$wifeLabel][$childLabel] = $fam->label;
+                }
+                if ($parentBirth) {
+                    $childBirth = $birthByLabel[$childLabel] ?? 0;
                     if ($childBirth) {
                         $ageDiffYears = round(($childBirth - $parentBirth) / 31556736);
                         if ($ageDiffYears < 0) {
-                            $childName = $root->children['@'][$child->label]->children['NAME'][0]->value ?? '?';
+                            $childName = $root->children['@'][$childLabel]->children['NAME'][0]->value ?? '?';
                             yield 'Parent younger ' . $ageDiffYears . ' then child: ' . $childName . ' child of ' . $parentName;
                         } elseif ($ageDiffYears < 15) {
-                            $childName = $root->children['@'][$child->label]->children['NAME'][0]->value ?? '?';
+                            $childName = $root->children['@'][$childLabel]->children['NAME'][0]->value ?? '?';
                             yield 'Young Parent ' . $ageDiffYears . ': ' . $childName . ' child of ' . $parentName;
                         } elseif ($ageDiffYears > 80) {
-                            $childName = $root->children['@'][$child->label]->children['NAME'][0]->value ?? '?';
+                            $childName = $root->children['@'][$childLabel]->children['NAME'][0]->value ?? '?';
                             yield 'Old Parent ' . $ageDiffYears . ': ' . $childName . ' child of ' . $parentName;
                         }
                     }
-
                 }
             }
-            //print_r($fam);
-            break;
+        }
+        //</editor-fold>
+
+        $individLabels = [];
+        foreach ($root->children['INDI'] ?? [] as $indi) {
+            if ($indi->label) {
+                $individLabels[$indi->label] = $indi->label;
+            }
+        }
+
+        //print_r($individLabels);
+        //print_r($labelPairs);
+
+        $trees = [];
+        $notConnected = $individLabels;
+        while ($notConnected) {
+            $treeStart = array_rand($notConnected);
+            $trees[] = $treeStart;
+            $todo = [$treeStart];
+            unset($notConnected[$treeStart]);
+            while ($todo) {
+                $nextIndi = array_pop($todo);
+                if (empty($labelPairs[$nextIndi])) {
+                    yield 'No family: ' . ($root->children['@'][$nextIndi]->children['NAME'][0]->value ?? $nextIndi);
+                }
+                foreach ($labelPairs[$nextIndi] ?? [] as $connectedIndi => $familyLabel) {
+                    if (empty($notConnected[$connectedIndi])) {
+                        continue;
+                    }
+                    unset($notConnected[$connectedIndi]);
+                    $todo[] = $connectedIndi;
+                }
+            }
+        }
+        if (count($trees) > 1) {
+            $treeNames = [];
+            foreach ($trees as $treeLabel) {
+                $treeNames[$treeLabel] = $root->children['@'][$treeLabel]->children['NAME'][0]->value ?? $treeLabel;
+            }
+            yield 'You have multiple unconnected trees: ' .
+                json_encode(array_values($treeNames), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
         }
     }
 
@@ -336,7 +413,11 @@ class GedMerger
                 $birthDateRange[1]
             ) : 'xxxx-xx-xx';
             if ($birthDate && str_contains($birthDateIso, 'x') && preg_match('#[a-zA-Z]#', $birthDate)) {
-                error_log('badDate: ' . json_encode($birthDate) . ' -> ' . json_encode($birthDateIso) . PHP_EOL);
+                error_log(
+                    'badDate: ' .
+                    json_encode($birthDate, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE) . ' -> ' .
+                    json_encode($birthDateIso, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE) . PHP_EOL
+                );
             }
             yield "{$birthDateIso} {$name}";
         }
@@ -357,7 +438,7 @@ class GedMerger
         if (!preg_match(self::REGEXP_DATE_RANGE, $dateString, $matches)) {
             if ($repair && preg_match(self::REGEXP_DATE_ISO, $dateString, $matches)) {
                 // OK
-            } else if (!preg_match(self::REGEXP_DATE_DMY_INVALID, $dateString, $matches)) {
+            } elseif (!preg_match(self::REGEXP_DATE_DMY_INVALID, $dateString, $matches)) {
                 return [-PHP_INT_MIN, PHP_INT_MAX];
             }
             if ($repair && !empty($matches['month'])) {
