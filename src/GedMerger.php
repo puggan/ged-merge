@@ -9,12 +9,12 @@ class GedMerger
 {
     // date / DatePeriod / dateRange / dateAppro
     const REGEXP_DATE_ISO = '#^(?<y>\d\d\d\d)-0?(?<m>\d\d?)-0?(?<d>\d\d?)$#';
-    const REGEXP_DATE_DMY = '#^(?:(?<c>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d>\d+) (?<m>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) (?<y>\d+)(?: (?<e>.*))?$#';
-    const REGEXP_DATE_DMY_INVALID = '#^(?:(?<c>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d>\d+) (?<month>[A-Za-z]+) (?<y>\d+)(?: (?<e>.*))?$#';
+    const REGEXP_DATE_DMY = '#^(?:(?<c>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d>\d+) (?<m>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) (?<y>\d+)(?: (?<e>[A-Za-z]+))?$#';
+    const REGEXP_DATE_DMY_INVALID = '#^(?:(?<c>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d>\d+) (?<month>[A-Za-z]+) (?<y>\d+)(?: (?<e>[A-Za-z]+))?$#';
     const REGEXP_DATE_RANGE =
         '#^((?<t1>BET) (?:(?:(?:(?<c1>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d1>\d+) )?(?<m1>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) )?(?<y1>\d+)(?: (?<e1>.*))? ' .
         '(?<t2>AND) (?:(?:(?:(?<c2>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d2>\d+) )?(?<m2>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) )?(?<y2>\d+)(?: (?<e2>.*))?|' .
-        '(?:(?<t>BEF|AFT|ABT|CAL|EST) )?(?:(?:(?:(?<c>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d>\d+) )?(?<m>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) )?(?<y>\d+)(?: (?<e>.*))?)$#';
+        '(?:(?<t>BEF|AFT|ABT|CAL|EST) )?(?:(?:(?:(?<c>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d>\d+) )?(?<m>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) )?(?<y>\d+)(?: (?<e>[A-Za-z]+))?)$#';
     const MONTH_NAMES = [1 => 'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
     const MONTH_LOOKUP = [
         'JAN' => 1,
@@ -33,11 +33,14 @@ class GedMerger
     const MONTH_REPAIR = [
         'FEBR' => 'FEB',
         'MARS' => 'MAR',
+        'APRIL' => 'APR',
         'MAJ' => 'MAY',
         'JUNI' => 'JUN',
         'JULI' => 'JUL',
+        'SEPT' => 'SEP',
         'OKT' => 'OCT',
     ];
+    const DATE_RANGE_MAX = [-PHP_INT_MIN, PHP_INT_MAX];
 
     private FileSessions $file;
 
@@ -208,6 +211,7 @@ class GedMerger
                     }
                 }
             }
+            $birthDates = array_values(array_filter($birthDates));
             if ($birthDates) {
                 $firstBirthDate = reset($birthDates);
                 $birthDateFrom = $firstBirthDate[0];
@@ -221,15 +225,12 @@ class GedMerger
                     yield 'Invalid birthdate for ' . $name . ': ' .
                         json_encode(array_keys($birthDates), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
                     // Try to repair, to enable more tests
-                    $firstBirthDate = self::parseDateRange(
-                        $indi->children['BIRT'][0]->children['DATE'][0]->value ?? ''
-                    );
-                    $birthDateFrom = $firstBirthDate[0];
-                    $birthDateTo = $firstBirthDate[1];
                 }
                 if ($birthDateFrom === PHP_INT_MIN || $birthDateTo === PHP_INT_MAX || $timeSpan > 3000000000) {
+                    $birthDate = 'xxxx-xx-xx';
                     // same error again, skip
                 } elseif ($timeSpan < 0) {
+                    $birthDate = 'xxxx-xx-xx';
                     yield 'Invalid birthdate-range for ' . $name . ': ' .
                         json_encode(array_keys($birthDates), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
                 } else {
@@ -241,7 +242,22 @@ class GedMerger
                 }
             } else {
                 $birthDate = 'xxxx-xx-xx';
-                yield 'No birthdate for ' . $name;
+                $birthDateFrom = null;
+                $birthDateTo = null;
+            }
+            if ($birthDate === 'xxxx-xx-xx') {
+                $birthDateString = $indi->children['BIRT'][0]->children['DATE'][0]->value ?? '';
+                $firstBirthDate = self::parseDateRange(
+                    $birthDateString
+                );
+                if ($firstBirthDate) {
+                    yield 'Repairable birthdate for ' . $name . ': ' . $birthDateString;
+                    $birthDateFrom = $firstBirthDate[0];
+                    $birthDateTo = $firstBirthDate[1];
+                    $birthDate = $this->dateRangeShortText($birthDateFrom, $birthDateTo);
+                } else {
+                    yield ($birthDateString ? 'Invalid' : 'No') . ' birthdate for ' . $name . ($birthDateString ? ': ' . $birthDateString : '');
+                }
             }
             //</editor-fold>
 
@@ -254,6 +270,7 @@ class GedMerger
                     }
                 }
             }
+            $deathDates = array_values(array_filter($deathDates));
             if ($deathDates) {
                 $firstDeathDate = reset($deathDates);
                 $deathDateFrom = $firstDeathDate[0];
@@ -264,20 +281,35 @@ class GedMerger
                 }
                 $timeSpan = $deathDateTo - $deathDateFrom;
                 if ($deathDateFrom === PHP_INT_MIN || $deathDateTo === PHP_INT_MAX || $timeSpan > 3000000000) {
+                    $deathDate = 'xxxx-xx-xx';
                     yield 'Invalid deathdate for ' . $name . ': ' .
                         json_encode(array_keys($deathDates), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
                 } elseif ($timeSpan < 0) {
-                    yield 'Invalid deathdate-ranfe for ' . $name . ': ' .
+                    $deathDate = 'xxxx-xx-xx';
+                    yield 'Invalid deathdate-range for ' . $name . ': ' .
                         json_encode(array_keys($deathDates), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
                 } else {
                     $deathDate = $this->dateRangeShortText($deathDateFrom, $deathDateTo);
                 }
             } else {
                 $deathDate = 'xxxx-xx-xx';
+                $deathDateFrom = null;
+                $deathDateTo = null;
+            }
+            if ($deathDate === 'xxxx-xx-xx') {
+                $firstDeathDate = self::parseDateRange(
+                    $indi->children['DEAT'][0]->children['DATE'][0]->value ?? ''
+                );
+                if ($firstDeathDate) {
+                    yield 'Invalid deathdate for ' . $name . ': ' . $indi->children['DEAT'][0]->children['DATE'][0]->value;
+                    $deathDateFrom = $firstDeathDate[0];
+                    $deathDateTo = $firstDeathDate[1];
+                    $deathDate = $this->dateRangeShortText($deathDateFrom, $deathDateTo);
+                }
             }
             //</editor-fold>
 
-            if ($deathDates && $birthDates) {
+            if ($deathDateTo && $birthDateFrom) {
                 $years = round(($deathDateFrom + $deathDateTo - $birthDateFrom - $birthDateTo) / 63113472);
                 if ($birthDateFrom > $deathDateTo) {
                     yield 'Negative age: ' . $years . ' for ' . $name;
@@ -425,25 +457,28 @@ class GedMerger
 
     /**
      * @param string $dateString
+     * @param bool $repair
      * @param int $aboutYears
      * @param int $maxYears
-     * @return int[] array{0: int, 1:int} 0: from, 1: to
+     * @return ?int[] array{0: int, 1:int} 0: from, 1: to
      */
-    public static function parseDateRange(string $dateString, bool $repair = true, int $aboutYears = 5, int $maxYears = 100): array
+    public static function parseDateRange(string $dateString, bool $repair = true, int $aboutYears = 5, int $maxYears = 100): ?array
     {
         if (!$dateString) {
-            return [-PHP_INT_MIN, PHP_INT_MAX];
+            return null;
         }
 
         if (!preg_match(self::REGEXP_DATE_RANGE, $dateString, $matches)) {
             if ($repair && preg_match(self::REGEXP_DATE_ISO, $dateString, $matches)) {
                 // OK
             } elseif (!preg_match(self::REGEXP_DATE_DMY_INVALID, $dateString, $matches)) {
-                return [-PHP_INT_MIN, PHP_INT_MAX];
+                return null;
             }
             if ($repair && !empty($matches['month'])) {
                 $monthOrg = $matches['month'];
                 $monthTest = mb_strtoupper($monthOrg);
+                var_dump(['$monthOrg' => $monthOrg, '$monthTest' => $monthTest, self::MONTH_LOOKUP[$monthTest] ?? null, self::MONTH_REPAIR[$monthTest] ?? null]);
+                die();
                 if (!empty(self::MONTH_LOOKUP[$monthTest])) {
                     return self::parseDateRange(
                         preg_replace('#\b' . $monthOrg . '\b#', $monthTest, $dateString),
@@ -464,21 +499,26 @@ class GedMerger
         }
 
         if ($matches['t1'] ?? '') {
+            $fromRange = self::dateSectionToTimes(
+                $matches['y1'] ?? '',
+                $matches['m1'] ?? '',
+                $matches['d1'] ?? '',
+                $matches['c1'] ?? '',
+                $matches['e1'] ?? '',
+            );
+            $toRange = self::dateSectionToTimes(
+                $matches['y2'] ?? '',
+                $matches['m2'] ?? '',
+                $matches['d2'] ?? '',
+                $matches['c2'] ?? '',
+                $matches['e2'] ?? '',
+            );
+            if (!$fromRange || !$toRange) {
+                return null;
+            }
             return [
-                self::dateSectionToTimes(
-                    $matches['y1'] ?? '',
-                    $matches['m1'] ?? '',
-                    $matches['d1'] ?? '',
-                    $matches['c1'] ?? '',
-                    $matches['e1'] ?? '',
-                )[0],
-                self::dateSectionToTimes(
-                    $matches['y2'] ?? '',
-                    $matches['m2'] ?? '',
-                    $matches['d2'] ?? '',
-                    $matches['c2'] ?? '',
-                    $matches['e2'] ?? '',
-                )[1],
+                $fromRange[0],
+                $toRange[1],
             ];
         }
         $range = self::dateSectionToTimes(
@@ -488,6 +528,10 @@ class GedMerger
             $matches['c'] ?? '',
             $matches['e'] ?? '',
         );
+
+        if (!$range) {
+            return null;
+        }
 
         return match ($matches['t'] ?? '') {
             '' => $range,
@@ -507,16 +551,16 @@ class GedMerger
         };
     }
 
-    private static function dateSectionToTimes($y, $m, $d, $c, $e): array
+    private static function dateSectionToTimes($y, $m, $d, $c, $e): ?array
     {
         if ($c && $c !== 'GREGORIAN') {
-            return [-PHP_INT_MIN, PHP_INT_MAX];
+            return null;
         }
 
         if ($e === 'BCE') {
             $y = -$y;
         } elseif ($e) {
-            return [-PHP_INT_MIN, PHP_INT_MAX];
+            return null;
         }
 
         if ($m && isset(self::MONTH_LOOKUP[$m])) {
