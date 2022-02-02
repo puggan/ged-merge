@@ -9,6 +9,7 @@ class FileRow
         public int $seekStart,
         public int $seekEnd,
         public int $lineNr,
+        public int $fileIndex = 0,
     )
     {
     }
