@@ -42,6 +42,8 @@ class GedMerger
     ];
     const DATE_RANGE_MAX = [-PHP_INT_MIN, PHP_INT_MAX];
 
+    public bool $debugFilter = false;
+
     private FileSessions $file;
 
     public function __construct(
@@ -75,39 +77,43 @@ class GedMerger
      * @param int|null $seekTo
      * @param int|null $lineFrom
      * @param int|null $lineTo
-     * @param bool $children
+     * @param bool $children yield all children, not just top-level rows
      * @return \Generator<GedRow>|GedRow[]
      * @throws \JsonException
      */
     public function parseRows(array $filters, ?int $seekFrom = null, ?int $seekTo = null, ?int $lineFrom = null, ?int $lineTo = null, bool $children = false): \Generator
     {
+        if($this->debugFilter) print_r($filters);
         /** @var GedRow[] $stack */
         $stack = [];
-        $wanted = static function (int $level, string $type) use ($stack, $filters): bool {
+        $wanted = static function (int $level, string $type, bool $debug) use ($stack, $filters): bool {
             $levelRules = $filters[$level] ?? null;
             if (is_bool($levelRules)) {
+                if($debug) error_log($level . ' ' . $type . ' bool: ' . ($levelRules ? 'true' : 'false'));
                 return $levelRules;
             }
 
             if (is_array($levelRules)) {
-                //echo $level, ' ', $type, in_array($type, $levelRules) ? '' : ' not', ' in ', json_encode($levelRules, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), PHP_EOL;
+                if($debug) error_log($level . ' ' . $type . (in_array($type, $levelRules) ? '' : ' not') . ' in ' . json_encode($levelRules, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
                 return in_array($type, $levelRules, true);
             }
             foreach (range($level, 0, -1) as $stackLevel) {
-                $levelRules = $filters[$level] ?? null;
+                $levelRules = $filters[$stackLevel] ?? null;
                 if (is_bool($levelRules)) {
+                    if($debug) error_log($level . ' ' . $type . ' by parent ' . $stackLevel . ' bool: ' . ($levelRules ? 'true' : 'false'));
                     return $levelRules;
                 }
 
                 if (is_array($levelRules)) {
                     $stackType = ($stack[$stackLevel] ?? null)?->type;
-                    //echo $stackLevel, ' ', $type, in_array($stackType, $levelRules) ? '' : ' not', ' in ', json_encode($levelRules, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), PHP_EOL;
+                    if($debug) error_log($level . ' ' . $type . ' by parent ' . $stackLevel . ' ' . $stackType . (in_array($type, $levelRules) ? '' : ' not') . ' in ' . json_encode($levelRules, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
                     return $stackType && in_array($stackType, $levelRules, true);
                 }
             }
+            if($debug) error_log($level . ' ' . $type . ' no rule found');
             return false;
         };
-        $popStack = static function (array &$stack) use ($children, $wanted): ?GedRow {
+        $popStack = static function (array &$stack, bool $debug) use ($children, $wanted): ?GedRow {
             $debugKey = implode(
                 '->',
                 array_map(function (GedRow $r) {
@@ -118,13 +124,13 @@ class GedMerger
             $lastPopped = array_pop($stack);
             $lastLeft = end($stack);
             if ($lastLeft) {
-                $addContent = $wanted($lastPopped->level, $lastPopped->type);
+                $addContent = $wanted($lastPopped->level, $lastPopped->type, $debug);
                 $lastLeft->addChild($lastPopped, $addContent);
                 //echo json_encode([$addContent, $lastPopped->type, $lastLeft->type, $lastPopped, $lastLeft], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), PHP_EOL;
                 if ($children && $addContent) {
                     return $lastPopped;
                 }
-            } elseif ($wanted($lastPopped->level, $lastPopped->type)) {
+            } elseif ($wanted($lastPopped->level, $lastPopped->type, $debug)) {
                 return $lastPopped;
             }
             return null;
@@ -143,7 +149,7 @@ class GedMerger
                 );
                 while (!empty($stack[$gedRow->level])) {
                     //echo '- ', implode('->', array_map( function(GedRow $r) {return $r->type;}, $stack)), PHP_EOL;
-                    $row = $popStack($stack);
+                    $row = $popStack($stack, $this->debugFilter);
                     if ($row) {
                         yield $row;
                     }
@@ -156,7 +162,7 @@ class GedMerger
         }
         while (!empty($stack)) {
             //echo '= ', implode('->', array_map( function(GedRow $r) {return $r->type;}, $stack)), PHP_EOL;
-            $row = $popStack($stack);
+            $row = $popStack($stack, $this->debugFilter);
             if ($row) {
                 yield $row;
             }
@@ -176,6 +182,25 @@ class GedMerger
             }
         }
         return $root;
+    }
+
+    public function reReadRow(GedRow $row, array $filters = []): ?GedRow
+    {
+        if (!$filters) {
+            $filters = [$row->level => [$row->type], $row->level + 1 => true];
+        }
+        $rows = iterator_to_array(
+            $this->parseRows(
+                $filters,
+                $row->row->seekStart,
+                $row->seekSectionEnd,
+                $row->row->lineNr,
+                $row->lineSectionEnd,
+            ),
+            false,
+        );
+
+        return $rows[0] ?? null;
     }
 
     /**
@@ -477,8 +502,6 @@ class GedMerger
             if ($repair && !empty($matches['month'])) {
                 $monthOrg = $matches['month'];
                 $monthTest = mb_strtoupper($monthOrg);
-                var_dump(['$monthOrg' => $monthOrg, '$monthTest' => $monthTest, self::MONTH_LOOKUP[$monthTest] ?? null, self::MONTH_REPAIR[$monthTest] ?? null]);
-                die();
                 if (!empty(self::MONTH_LOOKUP[$monthTest])) {
                     return self::parseDateRange(
                         preg_replace('#\b' . $monthOrg . '\b#', $monthTest, $dateString),
