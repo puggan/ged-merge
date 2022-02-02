@@ -3,7 +3,8 @@
   "description": "Tool for merging gedcom files (family tree files)",
   "type": "project",
   "require": {
-    "php": "^8.1"
+    "php": "^8.1",
+    "ext-mbstring": "*"
   },
   "license": "MIT",
   "autoload": {
@@ -16,5 +17,8 @@
       "name": "Puggan Sundragon",
       "email": "puggan@sundragon.se"
     }
-  ]
+  ],
+  "config": {
+    "sort-packages": true
+  }
 }
