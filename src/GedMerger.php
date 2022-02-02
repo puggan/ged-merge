@@ -8,8 +8,9 @@ use Puggan\GedMerge\File\FileSessions;
 class GedMerger
 {
     // date / DatePeriod / dateRange / dateAppro
+    const REGEXP_DATE_ISO = '#^(?<y>\d\d\d\d)-0?(?<m>\d\d?)-0?(?<d>\d\d?)$#';
     const REGEXP_DATE_DMY = '#^(?:(?<c>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d>\d+) (?<m>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) (?<y>\d+)(?: (?<e>.*))?$#';
-    const REGEXP_DATE_DMY_INVALID = '#^(?:(?<c>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d>\d+) (?:[A-Za-z]+) (?<y>\d+)(?: (?<e>.*))?$#';
+    const REGEXP_DATE_DMY_INVALID = '#^(?:(?<c>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d>\d+) (?<month>[A-Za-z]+) (?<y>\d+)(?: (?<e>.*))?$#';
     const REGEXP_DATE_RANGE =
         '#^((?<t1>BET) (?:(?:(?:(?<c1>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d1>\d+) )(?<m1>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) )(?<y1>\d+)(?: (?<e1>.*))? ' .
         '(?<t2>AND) (?:(?:(?:(?<c2>GREGORIAN|JULIAN|FRENCH_R|HEBREW) )?(?<d2>\d+) )(?<m2>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) )(?<y2>\d+)(?: (?<e2>.*))?|' .
@@ -28,6 +29,14 @@ class GedMerger
         'OCT' => 10,
         'NOV' => 11,
         'DEC' => 12,
+    ];
+    const MONTH_REPAIR = [
+        'FEBR' => 'FEB',
+        'MARS' => 'MAR',
+        'MAJ' => 'MAY',
+        'JUNI' => 'JUN',
+        'JULI' => 'JUL',
+        'OKT' => 'OCT',
     ];
 
     private FileSessions $file;
@@ -171,6 +180,7 @@ class GedMerger
      */
     public function validate(): \Generator
     {
+        $birthByLabel = [];
         $root = $this->readRoot(
             [0 => ['INDI', 'FAM'], 1 => ['NAME', 'BIRT', 'DEAT', 'WIFE', 'HUSB', 'CHIL'], 2 => ['DATE']]
         );
@@ -178,7 +188,7 @@ class GedMerger
             yield 'Empty / No persons';
         }
         foreach ($root->children['INDI'] ?? [] as $indi) {
-            //print_r($indi);
+            //<editor-fold desc="Name">
             $names = [];
             foreach ($indi->children['NAME'] ?? [] as $nameRow) {
                 $names[] = $nameRow->value;
@@ -187,11 +197,14 @@ class GedMerger
                 yield 'Multiple names: ' . json_encode($names, JSON_UNESCAPED_UNICODE);
             }
             $name = $names[0] ?? '(unknown)';
+            //</editor-fold>
+
+            //<editor-fold desc="BirthDay">
             $birthDates = [];
             foreach ($indi->children['BIRT'] ?? [] as $birthRow) {
                 foreach ($birthRow->children['DATE'] ?? [] as $dateRow) {
                     if ($dateRow->value) {
-                        $birthDates[$dateRow->value] = self::parseDateRange($dateRow->value);
+                        $birthDates[$dateRow->value] = self::parseDateRange($dateRow->value, false);
                     }
                 }
             }
@@ -204,30 +217,128 @@ class GedMerger
                     $birthDateTo = max($birthDateTo, $birthDate[1]);
                 }
                 $timeSpan = $birthDateTo - $birthDateFrom;
-                $avgTimestamp = (int) floor($birthDateFrom / 2 + $birthDateTo / 2);
                 if ($birthDateFrom === PHP_INT_MIN || $birthDateTo === PHP_INT_MAX || $timeSpan > 3000000000) {
-                    $birthDate = 'xxxx-xx-xx';
                     yield 'Invalid birthdate for ' . $name . ': ' . json_encode(array_keys($birthDates));
                 } elseif ($timeSpan < 0) {
-                    $birthDate = 'xxxx-xx-xx';
                     yield 'Invalid birthdate-ranfe for ' . $name . ': ' . json_encode(array_keys($birthDates));
-                } elseif ($timeSpan < 100000) {
-                    $birthDate = date('Y-m-d', $avgTimestamp);
-                } elseif ($timeSpan < 5000000) {
-                    $birthDate = date('Y-m', $avgTimestamp) . '-xx';
-                } elseif ($timeSpan < 35000000) {
-                    $birthDate = date('Y', $avgTimestamp) . '-xx-xx';
-                } elseif ($timeSpan < 350000000) {
-                    $birthDate = floor(date('Y', $avgTimestamp) / 10) . 'x-xx-xx';
-                } elseif ($timeSpan < 3500000000) {
-                    $birthDate = floor(date('Y', $avgTimestamp) / 100) . 'xx-xx-xx';
-                }
-                if ($birthDate !== 'xxxx-xx-xx') {
+                } else {
+                    $birthDate = $this->dateRangeShortText($birthDateFrom, $birthDateTo);
                     yield 'OK: ' . $birthDate . ' ' . $name;
+                }
+                if ($indi->label) {
+                    $birthByLabel[$indi->label] = floor($birthDateTo / 2 + $birthDateFrom / 2);
                 }
             } else {
                 yield 'No birthdate for ' . $name;
             }
+            //</editor-fold>
+
+            //<editor-fold desc="DeathDay">
+            $deathDates = [];
+            foreach ($indi->children['DEAT'] ?? [] as $deathRow) {
+                foreach ($deathRow->children['DATE'] ?? [] as $dateRow) {
+                    if ($dateRow->value) {
+                        $deathDates[$dateRow->value] = self::parseDateRange($dateRow->value, false);
+                    }
+                }
+            }
+            if ($deathDates) {
+                $firstDeathDate = reset($deathDates);
+                $deathDateFrom = $firstDeathDate[0];
+                $deathDateTo = $firstDeathDate[1];
+                foreach ($deathDates as $deathDate) {
+                    $deathDateFrom = min($deathDateFrom, $deathDate[0]);
+                    $deathDateTo = max($deathDateTo, $deathDate[1]);
+                }
+                $timeSpan = $deathDateTo - $deathDateFrom;
+                if ($deathDateFrom === PHP_INT_MIN || $deathDateTo === PHP_INT_MAX || $timeSpan > 3000000000) {
+                    yield 'Invalid deathdate for ' . $name . ': ' . json_encode(array_keys($deathDates));
+                } elseif ($timeSpan < 0) {
+                    yield 'Invalid deathdate-ranfe for ' . $name . ': ' . json_encode(array_keys($deathDates));
+                } else {
+                    $deathDate = $this->dateRangeShortText($deathDateFrom, $deathDateTo);
+                    yield 'OK: ' . $deathDate . ' ' . $name;
+                }
+            }
+            //</editor-fold>
+
+            if ($deathDates && $birthDates) {
+                $years = round(($deathDateFrom + $deathDateTo - $birthDateFrom - $birthDateTo) / 63113472);
+                if ($birthDateFrom > $deathDateTo) {
+                    yield 'Negative age: ' . $years . ' for ' . $name;
+                } elseif ($years >= 100) {
+                    yield 'Extream age: ' . $years . ' for ' . $name;
+                }
+            }
+        }
+
+        foreach ($root->children['FAM'] ?? [] as $fam) {
+            $husbandLabel = $fam->children['HUSB'][0]->value ?? '';
+            $wifeLabel = $fam->children['WIFE'][0]->value ?? '';
+
+            $husbandBirth = $birthByLabel[$husbandLabel] ?? 0;
+            $wifeBirth = $birthByLabel[$wifeLabel] ?? 0;
+            $husbandName = $root->children['@'][$husbandLabel]->children['NAME'][0]->value ?? '?';
+            $wifeName = $root->children['@'][$wifeLabel]->children['NAME'][0]->value ?? '?';
+            $parentBirth = max($wifeBirth, $husbandBirth);
+            $parentName = $wifeBirth > $husbandBirth ? $wifeName : $husbandName;
+
+            if ($wifeBirth && $husbandBirth) {
+                $ageDiff = abs($wifeBirth - $husbandBirth);
+                $ageDiffYears = round($ageDiff / 31556736);
+                if ($ageDiffYears > 50) {
+                    yield 'Parents age-diff ' . $ageDiffYears . ' years: ' . $husbandName . ' and ' . $wifeName;
+                }
+            }
+
+            if ($parentBirth) {
+                foreach ($fam->children['CHIL'] as $child) {
+                    $childBirth = $birthByLabel[$child->label] ?? 0;
+                    if ($childBirth) {
+                        $ageDiffYears = round(($childBirth - $parentBirth) / 31556736);
+                        if ($ageDiffYears < 0) {
+                            $childName = $root->children['@'][$child->label]->children['NAME'][0]->value ?? '?';
+                            yield 'Parent younger ' . $ageDiffYears . ' then child: ' . $childName . ' child of ' . $parentName;
+                        } elseif ($ageDiffYears < 15) {
+                            $childName = $root->children['@'][$child->label]->children['NAME'][0]->value ?? '?';
+                            yield 'Young Parent ' . $ageDiffYears . ': ' . $childName . ' child of ' . $parentName;
+                        } elseif ($ageDiffYears > 80) {
+                            $childName = $root->children['@'][$child->label]->children['NAME'][0]->value ?? '?';
+                            yield 'Old Parent ' . $ageDiffYears . ': ' . $childName . ' child of ' . $parentName;
+                        }
+                    }
+
+                }
+            }
+            //print_r($fam);
+            break;
+        }
+    }
+
+    /**
+     * @return \Generator<string>|string[]
+     */
+    public function nameList(): \Generator
+    {
+        $root = $this->readRoot(
+            [0 => ['INDI'], 1 => ['NAME', 'BIRT'], 2 => ['DATE']]
+        );
+        if (!$root->children['INDI']) {
+            return;
+        }
+        foreach ($root->children['INDI'] ?? [] as $indi) {
+            $name = $indi->children['NAME'][0]->value ?? '(unknown)';
+
+            $birthDate = $indi->children['BIRT'][0]->children['DATE'][0]->value ?? null;
+            $birthDateRange = $birthDate ? self::parseDateRange($birthDate) : null;
+            $birthDateIso = $birthDateRange ? $this->dateRangeShortText(
+                $birthDateRange[0],
+                $birthDateRange[1]
+            ) : 'xxxx-xx-xx';
+            if ($birthDate && str_contains($birthDateIso, 'x') && preg_match('#[a-zA-Z]#', $birthDate)) {
+                error_log('badDate: ' . json_encode($birthDate) . ' -> ' . json_encode($birthDateIso) . PHP_EOL);
+            }
+            yield "{$birthDateIso} {$name}";
         }
     }
 
@@ -237,15 +348,37 @@ class GedMerger
      * @param int $maxYears
      * @return int[] array{0: int, 1:int} 0: from, 1: to
      */
-    private static function parseDateRange(string $dateString, int $aboutYears = 5, int $maxYears = 100): array
+    public static function parseDateRange(string $dateString, bool $repair = true, int $aboutYears = 5, int $maxYears = 100): array
     {
         if (!$dateString) {
             return [-PHP_INT_MIN, PHP_INT_MAX];
         }
 
         if (!preg_match(self::REGEXP_DATE_RANGE, $dateString, $matches)) {
-            if (!preg_match(self::REGEXP_DATE_DMY_INVALID, $dateString, $matches)) {
+            if ($repair && preg_match(self::REGEXP_DATE_ISO, $dateString, $matches)) {
+                // OK
+            } else if (!preg_match(self::REGEXP_DATE_DMY_INVALID, $dateString, $matches)) {
                 return [-PHP_INT_MIN, PHP_INT_MAX];
+            }
+            if ($repair && !empty($matches['month'])) {
+                $monthOrg = $matches['month'];
+                $monthTest = mb_strtoupper($monthOrg);
+                if (!empty(self::MONTH_LOOKUP[$monthTest])) {
+                    return self::parseDateRange(
+                        preg_replace('#\b' . $monthOrg . '\b#', $monthTest, $dateString),
+                        false,
+                        $aboutYears,
+                        $maxYears,
+                    );
+                }
+                if (!empty(self::MONTH_REPAIR[$monthTest])) {
+                    return self::parseDateRange(
+                        preg_replace('#\b' . $monthOrg . '\b#', self::MONTH_REPAIR[$monthTest], $dateString),
+                        false,
+                        $aboutYears,
+                        $maxYears,
+                    );
+                }
             }
         }
 
@@ -339,5 +472,45 @@ class GedMerger
             strtotime("{$y}-{$m1}-{$d1} 00:00:00"),
             strtotime("{$y}-{$m2}-{$d2} 23:59:59"),
         ];
+    }
+
+    /**
+     * @param mixed $birthDateFrom
+     * @param mixed $birthDateTo
+     * @param mixed $timeSpan
+     * @param string $birthDate
+     * @param int $avgTimestamp
+     * @return string
+     */
+    private function dateRangeShortText(mixed $birthDateFrom, mixed $birthDateTo): string
+    {
+        $timeSpan = $birthDateTo - $birthDateFrom;
+        $avgTimestamp = (int)floor($birthDateFrom / 2 + $birthDateTo / 2);
+
+        if ($timeSpan < 0 || $birthDateFrom === PHP_INT_MIN || $birthDateTo === PHP_INT_MAX || $timeSpan > 3000000000) {
+            return 'xxxx-xx-xx';
+        }
+
+        if ($timeSpan < 100000) {
+            return date('Y-m-d', $avgTimestamp);
+        }
+
+        if ($timeSpan < 5000000) {
+            return date('Y-m', $avgTimestamp) . '-xx';
+        }
+
+        if ($timeSpan < 35000000) {
+            return date('Y', $avgTimestamp) . '-xx-xx';
+        }
+
+        if ($timeSpan < 350000000) {
+            return floor(date('Y', $avgTimestamp) / 10) . 'x-xx-xx';
+        }
+
+        if ($timeSpan < 3500000000) {
+            return floor(date('Y', $avgTimestamp) / 100) . 'xx-xx-xx';
+        }
+
+        return floor(date('Y', $avgTimestamp) / 1000) . 'xxx-xx-xx';
     }
 }
