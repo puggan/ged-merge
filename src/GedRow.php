@@ -90,4 +90,22 @@ class GedRow
         }
         return $this->level . ($label ? ' @' . $label . '@' : '') . ' ' . $this->type . ($value ? ' ' . $value : '');
     }
+
+    public static function int2xref(int $nr, string $suffix = '')
+    {
+        static $charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        static $charsetLength = 0;
+        if (!$charsetLength) {
+            $charsetLength = strlen($charset);
+        }
+
+        if ($nr < $charsetLength) {
+            return $charset[$nr] . $suffix;
+        }
+
+        $offsetedNr = $nr - $charsetLength;
+        $rest = $offsetedNr % $charsetLength;
+        $overflow = ($offsetedNr - $rest)/$charsetLength;
+        return self::int2xref($overflow, $charset[$rest] . $suffix);
+    }
 }
