@@ -38,13 +38,13 @@ class GedRow
         $this->lineSectionEnd = max($this->lineSectionEnd, $child->lineSectionEnd);
     }
 
-    public function makeChild(string $type, string $label, string $value)
+    public function makeChild(string $type, string $label, string $value): self
     {
         $fakeRow = new FileRow('', 0, 0, 0, -1);
         return new self($fakeRow, $this->level + 1, $type, $label, $value);
     }
 
-    public function appendChild(GedRow $child)
+    public function appendChild(GedRow $child): void
     {
         if ($child->level !== $this->level + 1) {
             throw new \RuntimeException(
@@ -55,7 +55,7 @@ class GedRow
         $this->children[$child->type][] = $child;
     }
 
-    public function replaceChild(GedRow $child)
+    public function replaceChild(GedRow $child): void
     {
         if ($child->level !== $this->level + 1) {
             throw new \RuntimeException(
@@ -63,24 +63,31 @@ class GedRow
             );
         }
         $this->children[$child->type] = [];
-        return $this->appendChild($child);
+        $this->appendChild($child);
     }
 
     /**
+     * @param string[] $labelTranslations
      * @return \Generator<self>|self[]
      */
-    public function lines(): \Generator
+    public function lines(array $labelTranslations = []): \Generator
     {
-        yield $this->line();
+        yield $this->line($labelTranslations);
         foreach ($this->children as $childTypeList) {
             foreach ($childTypeList as $child) {
-                yield from $child->lines();
+                yield from $child->lines($labelTranslations);
             }
         }
     }
 
-    public function line(): string
+    public function line(array $labelTranslations = []): string
     {
-        return $this->level . ($this->label ? ' @' . $this->label . '@' : '') . ' ' . $this->type . ($this->value ? ' ' . $this->value : '');
+        $label = $labelTranslations[$this->label] ?? $this->label;
+        if ($this->value && $labelTranslations && str_starts_with($this->value, '@')) {
+            $value = $labelTranslations[trim($this->value, '@')] ?? $this->value;
+        } else {
+            $value = $this->value;
+        }
+        return $this->level . ($label ? ' @' . $label . '@' : '') . ' ' . $this->type . ($value ? ' ' . $value : '');
     }
 }

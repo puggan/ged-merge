@@ -45,12 +45,15 @@ class GedMerger
     public bool $debugFilter = false;
 
     private FileSessions $file;
+    public array $files = [];
 
     public function __construct(
-        private string $gedFilePath
+        private string $gedFilePath,
+        private int $fileIndex = 1,
     )
     {
         $this->file = new FileSessions($gedFilePath);
+        $this->files[$this->fileIndex] = $this->file;
     }
 
     public function __destruct()
@@ -81,7 +84,7 @@ class GedMerger
      * @return \Generator<GedRow>|GedRow[]
      * @throws \JsonException
      */
-    public function parseRows(array $filters, ?int $seekFrom = null, ?int $seekTo = null, ?int $lineFrom = null, ?int $lineTo = null, bool $children = false): \Generator
+    public function parseRows(array $filters, ?int $seekFrom = null, ?int $seekTo = null, ?int $lineFrom = null, ?int $lineTo = null, bool $children = false, $fileIndex = null): \Generator
     {
         if($this->debugFilter) print_r($filters);
         /** @var GedRow[] $stack */
@@ -135,7 +138,11 @@ class GedMerger
             }
             return null;
         };
-        foreach ($this->file->getRows($seekFrom, $seekTo, $lineFrom, $lineTo) as $row) {
+        $file = $this->file;
+        if ($fileIndex && $fileIndex !== $this->fileIndex) {
+            $file = $this->files[$fileIndex];
+        }
+        foreach ($file->getRows($seekFrom, $seekTo, $lineFrom, $lineTo) as $row) {
             if (!$row->content) {
                 continue;
             }
@@ -186,6 +193,9 @@ class GedMerger
 
     public function reReadRow(GedRow $row, array $filters = []): ?GedRow
     {
+        if($row->row->fileIndex < 0) {
+            return $row;
+        }
         if (!$filters) {
             $filters = [$row->level => [$row->type], $row->level + 1 => true];
         }
@@ -196,6 +206,8 @@ class GedMerger
                 $row->seekSectionEnd,
                 $row->row->lineNr,
                 $row->lineSectionEnd,
+                false,
+                $row->row->fileIndex,
             ),
             false,
         );
