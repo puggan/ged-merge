@@ -673,4 +673,47 @@ class GedMerger
 
         return floor(date('Y', $avgTimestamp) / 1000) . 'xxx-xx-xx';
     }
+
+    public function concat(GedMerger $inputGed, GedRow $mainRoot, GedRow $inputRoot, array $labelTranslations)
+    {
+        $this->files += $inputGed->files;
+        $head = $this->reReadRow($mainRoot->children['HEAD'][0]) ?? throw new \RuntimeException('Failed to read head');
+        $foot = $mainRoot->children['TRLR'][0] ?? throw new \RuntimeException('Failed to read foot');
+        // $mainLabels = $mainRoot->children['@'];
+        // $inputLabels = $inputRoot->children['@'];
+        unset($mainRoot->children['@'], $mainRoot->children['HEAD'], $mainRoot->children['TRLR']);
+        unset($inputRoot->children['@'], $inputRoot->children['HEAD'], $inputRoot->children['TRLR']);
+
+        $time = time();
+        $headDate = $head->makeChild('DATE', '', strtoupper(date("j M Y", $time)));
+        $headTime = $headDate->makeChild('TIME', '', date('H:i:s', $time));
+        $headDate->appendChild($headTime);
+        $head->replaceChild($headDate);
+
+        /** @var GedRow[] $sections */
+        foreach ($head->lines() as $line) {
+            yield $line;
+        }
+        unset($head);
+
+        foreach ($mainRoot->children as $childTypeList) {
+            foreach ($childTypeList as  $child) {
+                $section = $this->reReadRow($child);
+                if (!$section) {
+                    throw new \RuntimeException('re-loaded child is null');
+                }
+                yield from $section->lines();
+            }
+        }
+        foreach ($inputRoot->children as $childTypeList) {
+            foreach ($childTypeList as  $child) {
+                $section = $inputGed->reReadRow($child);
+                if (!$section) {
+                    throw new \RuntimeException('re-loaded child is null');
+                }
+                yield from $section->lines($labelTranslations);
+            }
+        }
+        yield $foot->line();
+    }
 }
