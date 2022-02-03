@@ -32,8 +32,8 @@ require_once __DIR__ . '/vendor/autoload.php';
         fwrite($newFile, $line . PHP_EOL);
     }
     unset($head);
-    foreach($root->children as $i1 => $childTypeList) {
-        foreach($childTypeList as $i2 => $child) {
+    foreach($root->children as $childTypeList) {
+        foreach($childTypeList as $child) {
             $section = $ged->reReadRow($child);
             if (!$section) {
                 print_r([$section, $child]);
